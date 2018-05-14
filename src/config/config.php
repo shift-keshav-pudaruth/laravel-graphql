@@ -181,7 +181,9 @@ return [
      * ]
      */
     'types' => [
-
+        //Eloquent Types
+        Folklore\GraphQL\Eloquent\Type\Filter::class,
+        Folklore\GraphQL\Eloquent\Type\Order::class,        
     ],
 
     /*
@@ -206,5 +208,18 @@ return [
         'query_max_complexity' => null,
         'query_max_depth' => null,
         'disable_introspection' => false
-    ]
+    ],
+
+    /**
+     * Eloquent query/types settings
+     */
+    'eloquent' => [
+        //Query Settings
+        'query'=> [
+            //Filter Attribute name
+            'filterAttributeName' => 'EloquentFilter',
+            //Order by attribute name
+            'orderByAttributeName' => 'EloquentOrder'
+        ]
+    ]    
 ];
