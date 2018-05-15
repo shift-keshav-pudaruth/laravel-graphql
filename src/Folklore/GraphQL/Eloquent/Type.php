@@ -8,17 +8,15 @@
 
 namespace Folklore\GraphQL\Eloquent;
 
+use Folklore\GraphQL\Eloquent\Interfaces\EloquentParser;
 use Folklore\GraphQL\Support\Type as FolkloreType;
 use GraphQL\Type\Definition\ObjectType;
 use GraphQL\Type\Definition\Type as GraphQLType;
+use Illuminate\Database\Eloquent\Model;
+
 class Type extends FolkloreType
 {
     use Helper;
-
-    protected $baseEloquentOrderByAttributeName;
-    protected $baseEloquentFilterAttributeName;
-    protected $eloquentFilterAttributeName;
-    protected $eloquentOrderByAttributeName;
 
     public function __construct() {
         parent::__construct();
@@ -42,12 +40,8 @@ class Type extends FolkloreType
             //Resolve type
             $type = $this->getBaseType($fieldMeta['type']);
 
-            //if type is eloquent
-            if($type instanceof ObjectType) {
-                if(!isset($type->config['model'])) {
-                    throw new \Exception("Wrong configuration detected. Please set model in the {$type->name} 'attributes' attribute.");
-                }
-
+            //if type is eloquent, hence is a model
+            if($this->isEloquentModel($type)) {
                 $filterAttributeName = $this->formatVariableName(
                                             $this->baseEloquentFilterAttributeName,
                                             $this->attributes['name'],
@@ -60,15 +54,41 @@ class Type extends FolkloreType
                                         );
 
                 $injectedArgs = [
+                    //Filter
                     $filterAttributeName => [
                         'name' => $filterAttributeName,
                         'type' => GraphQLType::listOf(\GraphQL::type('eloquentFilter')),
                     ],
+                    //Order By
                     $orderByAttributeName => [
                         'name' => $orderByAttributeName,
                         'type' => GraphQLType::listOf(\GraphQL::type('eloquentOrder')),
+                    ],
+                    //Limit Argument
+                    $this->limitAttributeName => [
+                        'name' => $this->limitAttributeName,
+                        'type' => GraphQLType::int()
+                    ],
+                    //Offset Argument
+                    $this->offsetAttributeName => [
+                        'name' => $this->offsetAttributeName,
+                        'type' => GraphQLType::int()
                     ]
                 ];
+
+                //Check if model has soft delete trait
+                if(method_exists($this->config['model'],'trashed')) {
+                    //With Trashed
+                    $injectedArgs[$this->withTrashedAttributeName] = [
+                        'name' => $this->withTrashedAttributeName,
+                        'type' => GraphQLType::boolean()
+                    ];
+                    //onlyTrashed
+                    $injectedArgs[$this->onlyTrashedAttributeName] = [
+                        'name' => $this->onlyTrashedAttributeName,
+                        'type' => GraphQLType::boolean()
+                    ];
+                }
 
                 //Inject Eloquent args
                 if(isset($fieldMeta['args'])) {

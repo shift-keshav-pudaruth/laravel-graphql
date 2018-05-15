@@ -1,5 +1,7 @@
 <?php namespace Folklore\GraphQL;
 
+use Folklore\GraphQL\Eloquent\Type\PaginationCursor;
+use Folklore\GraphQL\Eloquent\Type\PaginationSimple;
 use Folklore\GraphQL\Support\Contracts\TypeConvertible;
 use GraphQL\GraphQL as GraphQLBase;
 use GraphQL\Type\Schema;
@@ -312,7 +314,16 @@ class GraphQL
             $this->types['PaginationCursor'] = new PaginationCursorType();
         }
 
-        // If the instace type of the given pagination does not exists, create a new one!
+        // Only add the PaginationEloquent when there is none defined;
+        if(!isset($this->types['PaginationEloquentSimple'])) {
+            $this->types['PaginationEloquentSimple'] = new PaginationSimple();
+        }
+        // Only add the PaginationEloquentCursor when there is none defined;
+        if(!isset($this->types['PaginationEloquentCursor'])) {
+            $this->types['PaginationEloquentCursor'] = new PaginationCursor();
+        }
+
+        // If the instance type of the given pagination does not exists, create a new one!
         if (!isset($this->typesInstances[$type->name . 'Pagination'])) {
             $this->typesInstances[$type->name . 'Pagination'] = new PaginationType($type->name);
         }

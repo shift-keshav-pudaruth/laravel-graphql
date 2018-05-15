@@ -8,6 +8,7 @@
 
 namespace Folklore\GraphQL\Eloquent;
 
+use Folklore\GraphQL\Support\PaginationType;
 use GraphQL\Language\AST\FieldNode;
 use GraphQL\Language\AST\NodeList;
 use Folklore\GraphQL\Error\ValidationError;
@@ -20,34 +21,42 @@ use GraphQL\Type\Definition\ListOfType;
 use Illuminate\Database\Eloquent\Builder;
 class Query extends FolkloreQuery
 {
-    use Helper;
+    use Helper, ShouldValidate;
 
     protected $variablePrefix;
-    protected $baseEloquentOrderByAttributeName;
-    protected $baseEloquentFilterAttributeName;
-    protected $eloquentFilterAttributeName;
-    protected $eloquentOrderByAttributeName;
-    protected $withTrashedAttributeName='withTrashed';
-    protected $onlyTrashedAttributeName='onlyTrashed';
     protected $eloquentFilters;
     protected $eloquentOrder;
     protected $whereOperators=['=', '<>', '!=', '>', '<','>=','<=','BETWEEN','LIKE','IN'];
     protected $defaultOperator = '=';
     protected $defaultJoin = 'AND';
+    protected $basePaginationAttributeName;
+    protected $eloquentPaginationAttributeName;
+    protected $defaultPaginationPerPage;
+    protected $paginationType;
 
-    use ShouldValidate;
-
+    /**
+     * Query constructor.
+     */
     public function __construct() {
         parent::__construct();
 
-        //Setup Eloquent Attribute Names
+        //Eloquent: Order By
         $this->baseEloquentOrderByAttributeName = config('graphql.eloquent.query.orderByAttributeName',
                                                         'EloquentOrderBy');
+        $this->eloquentOrderByAttributeName = $this->formatVariableName($this->baseEloquentOrderByAttributeName);
+
+        //Eloquent: Filter
         $this->baseEloquentFilterAttributeName = config('graphql.eloquent.query.filterAttributeName',
                                                         'EloquentFilter');
-
-        $this->eloquentOrderByAttributeName = $this->formatVariableName($this->baseEloquentOrderByAttributeName);
         $this->eloquentFilterAttributeName= $this->formatVariableName($this->baseEloquentFilterAttributeName);
+
+        //Eloquent: Pagination
+        $this->basePaginationAttributeName = config('graphql.eloquent.pagination.queryAttributeName',
+                                                    'EloquentPagination');
+        $this->eloquentPaginationAttributeName = $this->formatVariableName($this->basePaginationAttributeName);
+        $this->defaultPaginationPerPage = config('graphql.eloquent.pagination.per_page',10);
+
+        $this->paginationType = config('graphql.eloquent.pagination.type','simple');
     }
 
     protected function getValidator($args, $rules, $messages = [])
@@ -88,7 +97,7 @@ class Query extends FolkloreQuery
         {
             $type = $argumentMeta['type'];
             if($type instanceof self) {
-                if(!isset($type->config['model'])) {
+                if(!$this->isEloquentModel($type)) {
                     throw new \Exception("Wrong configuration detected. Please set model in the {$type->name} 'attributes' attribute.");
                 }
             }
@@ -102,7 +111,9 @@ class Query extends FolkloreQuery
             $newArgs[$argumentKey] = $argumentMeta;
         }
 
-        //Inject arguments
+        /*
+         * Inject arguments
+         */
 
         //Filter argument
         $newArgs[$this->eloquentFilterAttributeName] = [
@@ -116,36 +127,53 @@ class Query extends FolkloreQuery
             'type' => Type::listOf(\GraphQL::type('eloquentOrder'))
         ];
 
-        //Trashed
-        $newArgs[$this->withTrashedAttributeName] = [
-            'name' => $this->withTrashedAttributeName,
-            'type' => Type::boolean()
+        //Limit Argument
+        $newArgs[$this->limitAttributeName] = [
+            'name' => $this->limitAttributeName,
+            'type' => Type::int()
         ];
 
-        //Only Trashed
-        $newArgs[$this->onlyTrashedAttributeName] = [
-            'name' => $this->onlyTrashedAttributeName,
-            'type' => Type::boolean()
+        //Offset Argument
+        $newArgs[$this->offsetAttributeName] = [
+            'name' => $this->offsetAttributeName,
+            'type' => Type::int()
         ];
+
+        //If parent type supports soft deletes
+        if(method_exists($this->getBaseType()->config['model'],'trashed')) {
+            //Trashed
+            $newArgs[$this->withTrashedAttributeName] = [
+                'name' => $this->withTrashedAttributeName,
+                'type' => Type::boolean()
+            ];
+
+            //Only Trashed
+            $newArgs[$this->onlyTrashedAttributeName] = [
+                'name' => $this->onlyTrashedAttributeName,
+                'type' => Type::boolean()
+            ];
+        }
+
+        //Eloquent pagination
+        if($this->type() instanceof PaginationType) {
+            switch($this->paginationType) {
+                case 'cursor':
+                    $newArgs[$this->eloquentPaginationAttributeName] = [
+                        'name' => $this->eloquentPaginationAttributeName,
+                        'type' => \GraphQL::type('PaginationEloquentCursor')
+                    ];
+                    break;
+                case 'simple':
+                default:
+                    $newArgs[$this->eloquentPaginationAttributeName] = [
+                        'name' => $this->eloquentPaginationAttributeName,
+                        'type' => \GraphQL::type('PaginationEloquentSimple')
+                    ];
+                    break;
+            }
+        }
 
         return $newArgs;
-    }
-
-    protected function resolve($root, $args, $context, ResolveInfo $info)
-    {
-        $type = $info->returnType;
-        if ($type instanceof ListOfType) {
-            $type = $type->ofType;
-        }
-
-        if(!isset($type->config['model'])) {
-            throw new \Exception("Wrong configuration detected. Please set model in the {$type->name} 'attributes' attribute.");
-        }
-
-        $eloquentQuery = $type->config['model']->query();
-        $this->applyFilters($info,$eloquentQuery);
-
-        return $eloquentQuery->get();
     }
 
     /**
@@ -211,13 +239,22 @@ class Query extends FolkloreQuery
         if ($argumentsList->count()) {
             foreach ($argumentsList as $argumentField) {
                 //When extracting arguments by name, we bypass the eloquent attributes
-                if($argumentField->name->value !== $this->withTrashedAttributeName &&
-                    $argumentField->name->value !== $this->onlyTrashedAttributeName &&
+                if(!in_array($argumentField->name->value,
+                            [
+                                $this->withTrashedAttributeName,
+                                $this->onlyTrashedAttributeName,
+                                $this->limitAttributeName,
+                                $this->offsetAttributeName
+                            ])
+                    &&
+
                     !str_contains($argumentField->name->value,
                     [
                         $this->baseEloquentOrderByAttributeName,
-                        $this->baseEloquentFilterAttributeName
-                    ])) {
+                        $this->baseEloquentFilterAttributeName,
+                        $this->basePaginationAttributeName
+                    ]))
+                {
                     $arguments[$argumentField->name->value] = $argumentField->value->value;
                 }
             }
@@ -252,7 +289,7 @@ class Query extends FolkloreQuery
      * @return array
      * @throws \Exception
      */
-    protected function extractArgumentsFromVariable($variables, $variableName)
+    protected function extractArgumentsFromVariable(array $variables, $variableName)
     {
         //if argument list is not empty
         if (count($variables) && isset($variables[$variableName])) {
@@ -357,50 +394,106 @@ class Query extends FolkloreQuery
                     $outputArgumentList[$fieldName] = [ 'filter'=>array_merge($argumentsByName,$argumentsByEloquentFilter),
                                                         'orderBy'=>$argumentsByEloquentOrder,
                                                         'withTrashed' => $this->extractArgumentByName($selectionNode,$variables,$this->withTrashedAttributeName,false),
-                                                        'onlyTrashed' => $this->extractArgumentByName($selectionNode,$variables,$this->onlyTrashedAttributeName,false)
+                                                        'onlyTrashed' => $this->extractArgumentByName($selectionNode,$variables,$this->onlyTrashedAttributeName,false),
+                                                        'limit' => $this->extractArgumentByName($selectionNode,$variables,$this->limitAttributeName,false),
+                                                        'offset' => $this->extractArgumentByName($selectionNode,$variables,$this->offsetAttributeName,false),
                                                       ];
                 }
 
                 //Recursively walk through child relationships
                 $childSelections = $selectionNode->selectionSet->selections;
                 if (!empty($childSelections)) {
-                    $newNodeType = $field->getType();
+                    $newNodeType = $this->getBaseType($field->getType());
 
-                    if ($newNodeType instanceof ListOfType) {
-                        $newNodeType = $newNodeType->ofType;
+                    if($this->isEloquentModel($newNodeType)) {
+                        $outputArgumentList = $this->mapRelationArguments(
+                            $childSelections,
+                            $newNodeType,
+                            $variables,
+                            $outputArgumentList,
+                            $fieldName
+                        );
                     }
-
-                    $outputArgumentList = $this->mapRelationArguments(
-                                            $childSelections,
-                                            $newNodeType,
-                                            $variables,
-                                            $outputArgumentList,
-                                            $fieldName
-                                        );
                 }
             }
         }
         return $outputArgumentList;
     }
 
+    /**
+     * Get relationship names from query
+     *
+     * @param NodeList $selectionSet
+     * @param $nodeType
+     * @param array $relationsList
+     * @param string $prefix
+     */
+    protected function getRelations(NodeList $selectionSet, $nodeType, $relationsList=[], $prefix = '')
+    {
+        //Loop through each field
+        foreach($selectionSet as $selectionNode) {
+            //Field has attributes
+            if (!empty($selectionNode->selectionSet)) {
+                $selectionNodeName = $selectionNode->name->value;
+                $fieldName = empty($prefix) ? $selectionNodeName : "{$prefix}.{$selectionNodeName}";
+                $field = $nodeType->getField($selectionNodeName);
+                $fieldType = $this->getBaseType($field->getType());
 
+                //If it is an eloquent model, we assume that its name is the relationship's name
+                if($this->isEloquentModel($fieldType)) {
+                    $relationsList[] = $fieldName;
+
+                    //Recursively walk through child relationships
+                    $childSelections = $selectionNode->selectionSet->selections;
+                    if (!empty($childSelections)) {
+                        $relationsList = $this->getRelations(
+                            $childSelections,
+                            $fieldType,
+                            $relationsList,
+                            $fieldName
+                        );
+                    }
+                }
+            }
+        }
+
+        return $relationsList;
+    }
+
+    /**
+     * Map relations with their arguments
+     *
+     * @param ResolveInfo $info
+     * @param array $variables
+     * @return array
+     */
     protected function mapRelations(ResolveInfo $info, $variables)
     {
-        $fields   = $info->getFieldSelection(3);
-        $nodeType = $info->returnType;
-        if ($nodeType instanceof ListOfType) {
-            $nodeType = $nodeType->ofType;
+        $nodeType = $this->getBaseType($info->returnType);
+        $argumentSelections = $info->fieldNodes[0]->selectionSet->selections;
+        if($this->type() instanceof PaginationType) {
+            $arguments = $this->mapRelationArguments(
+                            $argumentSelections[0]->selectionSet->selections,
+                            $nodeType,
+                            $variables
+                        );
+            $relations   = $this->getRelations(
+                            $argumentSelections[0]->selectionSet->selections,
+                            $nodeType
+                        );
+        } else {
+            $arguments = $this->mapRelationArguments($argumentSelections, $nodeType, $variables);
+            $relations   = $this->getRelations(
+                $argumentSelections,
+                $nodeType
+            );
         }
-        $arguments = $this->mapRelationArguments($info->fieldNodes[0]->selectionSet->selections, $nodeType, $variables);
-        return collect(array_keys(array_dot($fields)))
-            //Formatting relationship names in eloquent notation
-            ->map(function (string $value): string {
-                return substr($value, 0, strrpos($value, '.') ?: 0);
-            })->unique()->filter()->flip()
-            //Add
-            ->map(function ($_, $relation) use ($arguments) {
-                return $arguments[$relation] ?? [];
-            })->toArray();
+
+        return collect($relations)
+                ->unique()->flip()
+                ->map(function ($_, $relation) use ($arguments) {
+                    return $arguments[$relation] ?? [];
+                })->toArray();
     }
 
     /**
@@ -514,6 +607,16 @@ class Query extends FolkloreQuery
                         $this->applyOnlyTrashedToQuery($query);
                     }
 
+                    //Offset
+                    if($conditions['offset']) {
+                        $query->offset($conditions['offset']);
+                    }
+
+                    //Limit
+                    if($conditions['limit']) {
+                        $query->limit($conditions['limit']);
+                    }
+
                     return $query;
                 };
             }
@@ -580,7 +683,47 @@ class Query extends FolkloreQuery
         }
     }
 
-    public function applyFilters($info, $eloquentQuery)
+    /**
+     * Apply pagination to query
+     *
+     * @param ResolveInfo $info
+     * @param $eloquentQuery
+     * @return mixed
+     */
+    public function applyPagination(ResolveInfo $info, $eloquentQuery)
+    {
+        $variables = $info->variableValues;
+        $paginationVariableName = $this->formatVariableName($this->basePaginationAttributeName);
+
+        switch($this->paginationType) {
+            case 'cursor':
+                //TODO: Parse cursor pagination data & apply it
+                break;
+            case 'simple':
+            default:
+                if(isset($variables[$paginationVariableName])) {
+                    $pagination = $variables[$paginationVariableName];
+                    return $eloquentQuery->paginate(
+                        $pagination['perPage'] ?? $this->defaultPaginationPerPage,
+                        ['*'],
+                        'page',
+                        $pagination['page'] ?? 0
+                    );
+                }
+        }
+
+
+        return $eloquentQuery->paginate($this->defaultPaginationPerPage, ['*'],'page',0);
+    }
+
+    /**
+     * Apply filters to query
+     *
+     * @param ResolveInfo $info
+     * @param $eloquentQuery
+     * @throws \Exception
+     */
+    public function applyFilters(ResolveInfo $info, $eloquentQuery)
     {
         //Apply filters & order to relations
         $this->requestedRelations($info, $eloquentQuery);
@@ -588,5 +731,39 @@ class Query extends FolkloreQuery
         $this->requestedFilters($info, $eloquentQuery);
         //Apply order to base type
         $this->requestedOrders($info, $eloquentQuery);
+    }
+
+    /**
+     * Resolve query
+     *
+     * @param $root
+     * @param $args
+     * @param $context
+     * @param ResolveInfo $info
+     * @return mixed
+     * @throws \Exception
+     */
+    public function resolve($root, $args, $context, ResolveInfo $info)
+    {
+        $type = $this->getBaseType($info->returnType);
+
+        if(!isset($type->config['model'])) {
+            throw new \Exception("Wrong configuration detected. Please set model in the {$type->name} 'attributes' array.");
+        }
+
+        //Query builder
+        $eloquentQuery = $type->config['model']->query();
+
+        //Apply filters to base query
+        $this->applyFilters($info,$eloquentQuery);
+
+        //If query returns paginated results
+        if($this->type() instanceof PaginationType) {
+            return $this->applyPagination($info,$eloquentQuery);
+        } else {
+            //Return all results
+            return $eloquentQuery->get();
+        }
+
     }
 }

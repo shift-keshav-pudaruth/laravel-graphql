@@ -8,9 +8,20 @@
 
 namespace Folklore\GraphQL\Eloquent;
 
+use Folklore\GraphQL\Support\PaginationType;
 use GraphQL\Type\Definition\ListOfType;
+use Illuminate\Database\Eloquent\Model;
 trait Helper
 {
+    protected $baseEloquentOrderByAttributeName;
+    protected $baseEloquentFilterAttributeName;
+    protected $eloquentFilterAttributeName;
+    protected $eloquentOrderByAttributeName;
+    protected $withTrashedAttributeName='EloquentWithTrashed';
+    protected $onlyTrashedAttributeName='EloquentOnlyTrashed';
+    protected $limitAttributeName='EloquentLimit';
+    protected $offsetAttributeName='EloquentOffset';
+
     /**
      * Get Base Eloquent Type
      *
@@ -19,6 +30,13 @@ trait Helper
      */
     protected function getBaseType($type=null) {
         $type = $type ?? $this->type();
+
+        //Pagination type
+        if($type instanceof PaginationType) {
+            $type = $type->getField('items')->getType();
+        }
+
+        //List type
         if ($type instanceof ListOfType) {
             $type = $type->getWrappedType();
         }
@@ -44,5 +62,16 @@ trait Helper
         }
 
         return $this->getBaseType()->name.ucfirst($variableName);
+    }
+
+    /**
+     * Check if graphql type is tied to an eloquent model
+     *
+     * @param $type
+     * @return bool
+     */
+    protected function isEloquentModel($type)
+    {
+        return isset($type->config['model']) && $type->config['model'] instanceof Model;
     }
 }
