@@ -214,12 +214,67 @@ return [
      * Eloquent query/types settings
      */
     'eloquent' => [
-        //Query Settings
+        /*
+         * Query
+         */
         'query'=> [
-            //Filter Attribute name
-            'filterAttributeName' => 'EloquentFilter',
-            //Order by attribute name
-            'orderByAttributeName' => 'EloquentOrder'
+            //Default Attribute Names
+            'attributeName' => [
+                'filter'        => 'EloquentFilter',
+                'orderBy'       => 'EloquentOrder',
+                'pagination'    => 'EloquentPagination',
+                'withTrashed'   => 'EloquentWithTrashed',
+                'onlyTrashed'   => 'EloquentOnlyTrashed',
+                'limit'         => 'EloquentLimit',
+                'offset'        => 'EloquentOffset'
+            ],
+            //Filter settings
+            'filter' => [
+                //Operator settings
+                'operator' => [
+                    //List of supported operators
+                    'list' => [
+                        //Equal
+                        '=',
+                        //Not Equal
+                        '<>',
+                        //Not Equal
+                        '!=',
+                        //More
+                        '>',
+                        //Less
+                        '<',
+                        //More or equal
+                        '>=',
+                        //Less or equal
+                        '<=',
+                        //Between two values
+                        'BETWEEN',
+                        //MYSQL Like Operator
+                        'LIKE',
+                        //Mysql IN list
+                        'IN',
+                        //Has - Eloquent relationship constraint
+                        'has',
+                        //Doesnthave - Eloquent relationship constraint
+                        'doesnthave',
+                        //Wherehas - Eloquent relationship constraint
+                        'wherehas',
+                        //Wheredoesnthave - Eloquent relationship constraint
+                        'wheredoesnthave'
+                    ],
+                ]
+            ]
+        ],
+
+        /*
+         * Pagination
+         */
+        'pagination' => [
+            //Default Type: Simple or Cursor(WIP)
+            'type' => 'simple',
+            //Default number of items per page
+            'per_page' => 10
         ]
     ]    
 ];

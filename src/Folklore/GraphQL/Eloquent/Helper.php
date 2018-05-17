@@ -13,14 +13,120 @@ use GraphQL\Type\Definition\ListOfType;
 use Illuminate\Database\Eloquent\Model;
 trait Helper
 {
+    /**
+     * Pagination attribute name - Base
+     *
+     * @var string
+     */
+    protected $basePaginationAttributeName;
+
+    /**
+     * Pagination attribute name combined with type in use with query variables
+     *
+     * @var string
+     */
+    protected $eloquentPaginationAttributeName;
+
+    /**
+     * Pagination - Items per page
+     *
+     * @var integer
+     */
+    protected $defaultPaginationPerPage;
+
+    /**
+     * Pagination - Type of data
+     *
+     * @var string
+     */
+    protected $paginationType;
+
+    /**
+     * Order by attribute name - Base
+     *
+     * @var string
+     */
     protected $baseEloquentOrderByAttributeName;
-    protected $baseEloquentFilterAttributeName;
-    protected $eloquentFilterAttributeName;
+
+    /**
+     * Order by attribute name in use with query variables
+     *
+     * @var
+     */
     protected $eloquentOrderByAttributeName;
-    protected $withTrashedAttributeName='EloquentWithTrashed';
-    protected $onlyTrashedAttributeName='EloquentOnlyTrashed';
-    protected $limitAttributeName='EloquentLimit';
-    protected $offsetAttributeName='EloquentOffset';
+
+    /**
+     * Filter attribute name - Base
+     *
+     * @var string
+     */
+    protected $baseEloquentFilterAttributeName;
+
+    /**
+     * Filter Attribute name in use with query variables
+     *
+     * @var string
+     */
+    protected $eloquentFilterAttributeName;
+
+    /**
+     * With trashed attribute name in use with query argument
+     *
+     * @var string
+     */
+    protected $withTrashedAttributeName;
+
+    /**
+     * Only trashed attribute name in use with query argument
+     *
+     * @var string
+     */
+    protected $onlyTrashedAttributeName;
+
+    /**
+     * Limit attribute name in use with query argument
+     *
+     * @var string
+     */
+    protected $limitAttributeName;
+
+    /**
+     * Offset attribute name in use with query argument
+     *
+     * @var string
+     */
+    protected $offsetAttributeName;
+
+    /**
+     * Setup attribute names
+     *
+     * Call it in the construct function
+     */
+    protected function setupAttributeNames()
+    {
+        //Eloquent: Order By
+        $this->baseEloquentOrderByAttributeName = config('graphql.eloquent.query.attributeName.orderBy','EloquentOrderBy');
+        $this->eloquentOrderByAttributeName = $this->formatVariableName($this->baseEloquentOrderByAttributeName);
+
+        //Eloquent: Filter
+        $this->baseEloquentFilterAttributeName = config('graphql.eloquent.query.attributeName.filter', 'EloquentFilter');
+        $this->eloquentFilterAttributeName= $this->formatVariableName($this->baseEloquentFilterAttributeName);
+
+        //Eloquent: Pagination
+        $this->basePaginationAttributeName = config('graphql.eloquent.query.attributeName.pagination', 'EloquentPagination');
+        $this->eloquentPaginationAttributeName = $this->formatVariableName($this->basePaginationAttributeName);
+        $this->defaultPaginationPerPage = config('graphql.eloquent.pagination.per_page',10);
+
+        $this->paginationType = config('graphql.eloquent.pagination.type','simple');
+
+        //Trashed
+        $this->withTrashedAttributeName = config('graphql.eloquent.query.attributeName.withTrashed','EloquentWithTrashed');
+        $this->onlyTrashedAttributeName = config('graphql.eloquent.query.attributeName.onlyTrashed','EloquentOnlyTrashed');
+
+        //Offset/Limit
+        $this->limitAttributeName = config('graphql.eloquent.query.attributeName.limit','EloquentLimit');
+        $this->offsetAttributeName = config('graphql.eloquent.query.attributeName.offset','EloquentOffset');
+    }
 
     /**
      * Get Base Eloquent Type

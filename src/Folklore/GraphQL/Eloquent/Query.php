@@ -23,16 +23,10 @@ class Query extends FolkloreQuery
 {
     use Helper, ShouldValidate;
 
-    protected $variablePrefix;
-    protected $eloquentFilters;
-    protected $eloquentOrder;
+    protected $allowedOperators;
     protected $whereOperators=['=', '<>', '!=', '>', '<','>=','<=','BETWEEN','LIKE','IN'];
     protected $defaultOperator = '=';
     protected $defaultJoin = 'AND';
-    protected $basePaginationAttributeName;
-    protected $eloquentPaginationAttributeName;
-    protected $defaultPaginationPerPage;
-    protected $paginationType;
 
     /**
      * Query constructor.
@@ -40,23 +34,11 @@ class Query extends FolkloreQuery
     public function __construct() {
         parent::__construct();
 
-        //Eloquent: Order By
-        $this->baseEloquentOrderByAttributeName = config('graphql.eloquent.query.orderByAttributeName',
-                                                        'EloquentOrderBy');
-        $this->eloquentOrderByAttributeName = $this->formatVariableName($this->baseEloquentOrderByAttributeName);
+        //Setup default attribute names from config
+        $this->setupAttributeNames();
 
-        //Eloquent: Filter
-        $this->baseEloquentFilterAttributeName = config('graphql.eloquent.query.filterAttributeName',
-                                                        'EloquentFilter');
-        $this->eloquentFilterAttributeName= $this->formatVariableName($this->baseEloquentFilterAttributeName);
-
-        //Eloquent: Pagination
-        $this->basePaginationAttributeName = config('graphql.eloquent.pagination.queryAttributeName',
-                                                    'EloquentPagination');
-        $this->eloquentPaginationAttributeName = $this->formatVariableName($this->basePaginationAttributeName);
-        $this->defaultPaginationPerPage = config('graphql.eloquent.pagination.per_page',10);
-
-        $this->paginationType = config('graphql.eloquent.pagination.type','simple');
+        //List of allowed operators in a filter condition
+        $this->allowedOperators = config('graphql.eloquent.query.filter.operator.list');
     }
 
     protected function getValidator($args, $rules, $messages = [])
@@ -89,22 +71,38 @@ class Query extends FolkloreQuery
         return true;
     }
 
-    public function processArgs($args)
+    /**
+     * Inject eloquent arguments into query's arguments
+     *
+     * @param array $args
+     * @return array
+     * @throws \Exception
+     */
+    public function processArgs(array $args)
     {
         $newArgs = [];
 
+        //Loop through each argument and build a new array of arguments
         foreach($args as $argumentKey => $argumentMeta)
         {
             $type = $argumentMeta['type'];
-            if($type instanceof self) {
-                if(!$this->isEloquentModel($type)) {
-                    throw new \Exception("Wrong configuration detected. Please set model in the {$type->name} 'attributes' attribute.");
-                }
-            }
 
             //Check if there are conflict of name with reserved names
-            if(in_array($argumentKey,[$this->eloquentFilterAttributeName,$this->eloquentOrderByAttributeName]) ||
-                in_array($argumentMeta['name'],[$this->eloquentFilterAttributeName,$this->eloquentOrderByAttributeName])) {
+            if(in_array($argumentKey,[
+                    $this->eloquentFilterAttributeName,
+                    $this->eloquentOrderByAttributeName,
+                    $this->eloquentPaginationAttributeName,
+                    $this->limitAttributeName,
+                    $this->offsetAttributeName
+                ]) ||
+                in_array($argumentMeta['name'],[
+                    $this->eloquentFilterAttributeName,
+                    $this->eloquentOrderByAttributeName,
+                    $this->eloquentPaginationAttributeName,
+                    $this->limitAttributeName,
+                    $this->offsetAttributeName
+                ]))
+            {
                 throw new \Exception("{$argumentKey} is a reserved argument name by the GraphQL Eloquent Query. Please rename this argument.");
             }
 
@@ -380,7 +378,6 @@ class Query extends FolkloreQuery
                                                         $fieldName
                                                     )
                                                 );
-                    
 
                     //Order By
                     $argumentsByEloquentOrder = $this->extractArgumentsFromVariable(
@@ -391,6 +388,7 @@ class Query extends FolkloreQuery
                                                         $fieldName
                                                     )
                                                 );
+                    //Build argument list
                     $outputArgumentList[$fieldName] = [ 'filter'=>array_merge($argumentsByName,$argumentsByEloquentFilter),
                                                         'orderBy'=>$argumentsByEloquentOrder,
                                                         'withTrashed' => $this->extractArgumentByName($selectionNode,$variables,$this->withTrashedAttributeName,false),
@@ -503,34 +501,61 @@ class Query extends FolkloreQuery
      * @param array $conditions
      * @return mixed
      */
-    private function applyFilterToQuery($query, array $conditions)
+    protected function applyFilterToQuery($query, array $conditions)
     {
-        foreach($conditions as $condition) {
-            //Where operator
-            if(in_array($condition['operator'],$this->whereOperators)) {
-                $query->where($condition['name'],$condition['operator'],$condition['value'],$condition['join']);
-                continue;
-            }
+        $allowedOperators = array_map(function($val){
+                                return strtolower($val);
+                            },$this->allowedOperators);
 
-            //Has
-            switch(strtolower($condition['operator'])) {
-                case 'has':
-                    $query->has($condition['value']);
-                    break;
-                case 'doesnthave':
-                    $query->doesntHave($condition['value']);
-                    break;
-                //TODO: Figure formatting of nested where has
-                case 'wheredoesnthave':
-                    $query->whereDoesntHave($condition['name'],function($query){
-                        return $this->applyFilterToQuery($query,$condition['filter']);
-                    });
-                    break;
-                case 'wherehas':
-                    $query->whereHas($condition['name'], function($query){
-                        return $this->applyFilterToQuery($query,$condition['filter']);
-                    });
-                    break;
+        //Loop through each condition & apply it if supported, to the query
+        foreach($conditions as $condition) {
+            if(in_array(strtolower($condition['operator']), $allowedOperators)) {
+                //Where operator
+                if(in_array($condition['operator'],$this->whereOperators)) {
+                    $query->where($condition['name'],$condition['operator'],$condition['value'],$condition['join']);
+                    continue;
+                }
+
+                //Eloquent relationship constraints
+                switch(strtolower($condition['operator'])) {
+                    case 'has':
+                        $query->has(
+                            $condition['value']['relation'],
+                            $condition['value']['operator'] ?? '>=',
+                            $condition['value']['count'] ?? 1,
+                            $condition['join']
+                        );
+                        break;
+                    case 'doesnthave':
+                        $query->doesntHave($condition['value']['relation'],$condition['join']);
+                        break;
+                    //TODO: Figure formatting of nested where has
+                    case 'wheredoesnthave':
+                        $query->whereDoesntHave($condition['name'],function($query){
+                            return $this->applyFilterToQuery($query,$condition['filter']);
+                        });
+                        break;
+                    case 'orWhereDoesntHave':
+                        $query->orWhereDoesntHave($condition['name'],function($query){
+                            return $this->applyFilterToQuery($query,$condition['filter']);
+                        });
+                        break;
+                    case 'wherehas':
+                        $query->whereHas($condition['name'], function($query){
+                            return $this->applyFilterToQuery($query,$condition['filter']);
+                        },$condition['value']['operator'] ?? '>=', $condition['value']['count'] ?? 1);
+                        break;
+                    case 'orWhereHas':
+                        $query->orWhereHas($condition['name'], function($query){
+                            return $this->applyFilterToQuery($query,$condition['filter']);
+                        },$condition['value']['operator'] ?? '>=', $condition['value']['count'] ?? 1);
+                        break;
+                    default:
+                        throw new \Exception("The operator '{$condition['operator']}' is allowed but wasn't processed.");
+                        break;
+                }
+            } else {
+                throw new \Exception("The operator '{$condition['operator']}' is forbidden");
             }
         }
 
@@ -586,35 +611,52 @@ class Query extends FolkloreQuery
     {
         $relations = $this->mapRelations($info, $info->variableValues);
         $relationArray = [];
+
+        //Loop through each relation and apply its conditions
         foreach ($relations as $relation => $conditions) {
             if(count($conditions)) {
-                $relationArray[$relation] =  function ($query) use ($conditions) {
-                    //Apply filter & order
-                    $query = $this->applyOrderToQuery(
-                                $this->applyFilterToQuery(
-                                    $query,
-                                    $conditions['filter']
-                                ),
+                $relationArray[$relation] =  function ($query) use ($conditions,$relation,$info) {
+                    $continueProcessing = true;
+                    /*
+                     * Before query is applied to relationship
+                     * Run this method
+                     * If query returns false, we stop processing the remaining conditions
+                     * When relationship name is 'user.roles', method name will be 'beforeUserRolesQuery'
+                    */
+                    $beforeMethodName = 'before'.implode('',array_map(function($val){return ucfirst($val);},explode('.',$relation))).'Query';
+                    if(method_exists($this,$beforeMethodName)) {
+                        $continueProcessing = $this->$beforeMethodName($conditions,$info,$query) === null ?? true;
+                    }
+
+                    //Continue processing
+                    if($continueProcessing) {
+                        //Apply filter & order
+                        $query = $this->applyOrderToQuery(
+                            $this->applyFilterToQuery(
+                                $query,
+                                $conditions['filter']
+                            ),
                             $conditions['orderBy']);
 
-                    //Apply with trashed filter
-                    if($conditions['withTrashed']) {
-                        $this->applyWithTrashedToQuery($query);
-                    }
+                        //Apply with trashed filter
+                        if($conditions['withTrashed']) {
+                            $this->applyWithTrashedToQuery($query);
+                        }
 
-                    //Apply only trashed filter
-                    if($conditions['onlyTrashed']) {
-                        $this->applyOnlyTrashedToQuery($query);
-                    }
+                        //Apply only trashed filter
+                        if($conditions['onlyTrashed']) {
+                            $this->applyOnlyTrashedToQuery($query);
+                        }
 
-                    //Offset
-                    if($conditions['offset']) {
-                        $query->offset($conditions['offset']);
-                    }
+                        //Offset
+                        if($conditions['offset']) {
+                            $query->offset($conditions['offset']);
+                        }
 
-                    //Limit
-                    if($conditions['limit']) {
-                        $query->limit($conditions['limit']);
+                        //Limit
+                        if($conditions['limit']) {
+                            $query->limit($conditions['limit']);
+                        }
                     }
 
                     return $query;
@@ -727,6 +769,7 @@ class Query extends FolkloreQuery
     {
         //Apply filters & order to relations
         $this->requestedRelations($info, $eloquentQuery);
+
         //Apply filters to base type
         $this->requestedFilters($info, $eloquentQuery);
         //Apply order to base type
@@ -754,8 +797,20 @@ class Query extends FolkloreQuery
         //Query builder
         $eloquentQuery = $type->config['model']->query();
 
-        //Apply filters to base query
-        $this->applyFilters($info,$eloquentQuery);
+        //Before main query executes, check for method and execute it
+        //If it returns false, we skip applying filters
+        $continueApplyingFilters = true;
+        $beforeMethodName = 'before'.ucfirst($type->name).'Query';
+        if(method_exists($this,$beforeMethodName)) {
+            $continueApplyingFilters = $this->$beforeMethodName($root, $args, $context, $info,$eloquentQuery) ?? true;
+        }
+
+        //Processing is a go
+        if($continueApplyingFilters) {
+            //Apply filters to base query
+            $this->applyFilters($info,$eloquentQuery);
+        }
+
 
         //If query returns paginated results
         if($this->type() instanceof PaginationType) {

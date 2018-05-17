@@ -21,17 +21,17 @@ class Type extends FolkloreType
     public function __construct() {
         parent::__construct();
 
-        //Setup Eloquent Attribute Names
-        $this->baseEloquentOrderByAttributeName = config('graphql.eloquent.query.orderByAttributeName',
-            'EloquentOrderBy');
-        $this->baseEloquentFilterAttributeName = config('graphql.eloquent.query.filterAttributeName',
-            'EloquentFilter');
-
-        $this->eloquentOrderByAttributeName = $this->formatVariableName($this->baseEloquentOrderByAttributeName);
-        $this->eloquentFilterAttributeName= $this->formatVariableName($this->baseEloquentFilterAttributeName);
+        //Setup default attribute names from config
+        $this->setupAttributeNames();
     }
 
-    public function processFields($fields)
+    /**
+     * Inject eloquent fields where necessary
+     *
+     * @param array $fields
+     * @return array
+     */
+    public function processFields(array $fields)
     {
         $newFields = [];
 
