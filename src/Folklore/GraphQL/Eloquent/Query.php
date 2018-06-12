@@ -253,7 +253,16 @@ class Query extends FolkloreQuery
                         $this->basePaginationAttributeName
                     ]))
                 {
-                    $arguments[$argumentField->name->value] = $argumentField->value->value;
+                    //Is a variable
+                    if(!isset($argumentField->value->value)) {
+                        //Variable is set, we borrow its value
+                        if(isset($variables[$argumentField->name->value])) {
+                            $arguments[$argumentField->name->value] = $variables[$argumentField->name->value];
+                        }
+                    } else {
+                        //value is passed directly through argument
+                        $arguments[$argumentField->name->value] = $argumentField->value->value;
+                    }
                 }
             }
         } elseif (isset($variables[$fieldNode->name->value])) {
@@ -683,12 +692,16 @@ class Query extends FolkloreQuery
     {
         $arguments = [];
         if($this->getBaseType()) {
-            $argumentsByName = $this->extractFilterArgumentsByName($info->fieldNodes[0],$info->variableValues);
+            $argumentsByName = [];
+            if(isset($info->fieldNodes[0])) {
+                $argumentsByName = $this->extractFilterArgumentsByName($info->fieldNodes[0],$info->variableValues);
+            }
+
             $argumentsByEloquentFilter = $this->extractArgumentsFromVariable(
                                             $info->variableValues,
                                             $this->formatVariableName(
                                                 $this->baseEloquentFilterAttributeName,
-                                                $this->getBaseType()->name
+                                                $this->config['name']
                                             )
                                         );
 
@@ -710,15 +723,13 @@ class Query extends FolkloreQuery
     public function requestedOrders(ResolveInfo $info, $eloquentQuery)
     {
         $argumentsByEloquentOrder = [];
-        if($this->getBaseType()) {
-            $argumentsByEloquentOrder = $this->extractArgumentsFromVariable(
-                $info->variableValues,
-                $this->formatVariableName(
-                    $this->baseEloquentOrderByAttributeName,
-                    $this->getBaseType()->name
-                )
-            );
-        }
+        $argumentsByEloquentOrder = $this->extractArgumentsFromVariable(
+            $info->variableValues,
+            $this->formatVariableName(
+                $this->baseEloquentOrderByAttributeName,
+                $this->name
+            )
+        );
 
         if (!empty($argumentsByEloquentOrder)) {
             $this->applyOrderToQuery($eloquentQuery,$argumentsByEloquentOrder);
@@ -772,6 +783,7 @@ class Query extends FolkloreQuery
 
         //Apply filters to base type
         $this->requestedFilters($info, $eloquentQuery);
+
         //Apply order to base type
         $this->requestedOrders($info, $eloquentQuery);
     }
@@ -816,8 +828,8 @@ class Query extends FolkloreQuery
         if($this->type() instanceof PaginationType) {
             return $this->applyPagination($info,$eloquentQuery);
         } else {
-            //Return all results
-            return $eloquentQuery->get();
+            //Return result
+            return $eloquentQuery->first();
         }
 
     }

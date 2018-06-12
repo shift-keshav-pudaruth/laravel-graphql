@@ -106,15 +106,15 @@ trait Helper
     {
         //Eloquent: Order By
         $this->baseEloquentOrderByAttributeName = config('graphql.eloquent.query.attributeName.orderBy','EloquentOrderBy');
-        $this->eloquentOrderByAttributeName = $this->formatVariableName($this->baseEloquentOrderByAttributeName);
+        $this->eloquentOrderByAttributeName = $this->formatVariableName($this->baseEloquentOrderByAttributeName,$this->name);
 
         //Eloquent: Filter
         $this->baseEloquentFilterAttributeName = config('graphql.eloquent.query.attributeName.filter', 'EloquentFilter');
-        $this->eloquentFilterAttributeName= $this->formatVariableName($this->baseEloquentFilterAttributeName);
+        $this->eloquentFilterAttributeName= $this->formatVariableName($this->baseEloquentFilterAttributeName,$this->name);
 
         //Eloquent: Pagination
         $this->basePaginationAttributeName = config('graphql.eloquent.query.attributeName.pagination', 'EloquentPagination');
-        $this->eloquentPaginationAttributeName = $this->formatVariableName($this->basePaginationAttributeName);
+        $this->eloquentPaginationAttributeName = $this->formatVariableName($this->basePaginationAttributeName,$this->name);
         $this->defaultPaginationPerPage = config('graphql.eloquent.pagination.per_page',10);
 
         $this->paginationType = config('graphql.eloquent.pagination.type','simple');
