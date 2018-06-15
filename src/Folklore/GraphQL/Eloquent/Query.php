@@ -78,7 +78,7 @@ class Query extends FolkloreQuery
      * @return array
      * @throws \Exception
      */
-    public function processArgs(array $args)
+    public function processArgs(array $args=[])
     {
         $newArgs = [];
 
